@@ -15,9 +15,13 @@ func sigHandler() {
 	for signal := range signalChannel {
 		switch signal {
 		case syscall.SIGHUP:
-			fmt.Println("Caugh signal SIGHUP")
+			// fmt.Println("Caught signal SIGHUP")
+			d.Log().Info("Caught signal SIGHUP")
 		default:
 			fmt.Println("a weird signal caught, shutting down just in case")
+			d.Log().Warning("Caught signal ", signal.String())
+			d.Shutdown()
+			return
 		}
 	}
 }

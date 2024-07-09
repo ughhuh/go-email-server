@@ -1,17 +1,15 @@
 
 {
-    "log_file" : "./tests/testlog",
     "log_level" : "debug",
-    "pid_file" : "tests/go-guerrilla.pid",
     "allowed_hosts": ["spam4.me","grr.la"],
     "backend_config" :
         {
             "log_received_mails" : true,
-            "save_process": "HeadersParser|Header|Hasher|Debugger|Sql",
+            "save_process": "HeadersParser|Header|Hasher|Debugger|PSQL",
             "save_workers_size":  3,
             "sql_driver": "pq",
             "sql_dsn": "postgresql://postgres:postgres@localhost/tododbname",
-            "mail_table":"new",
+            "mail_table":"new"
         },
     "servers" : [
         {
