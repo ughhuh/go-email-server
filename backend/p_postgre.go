@@ -24,41 +24,12 @@ import (
 // input: header, mailfrom, subject
 // output: idk, saves email i guess
 
-// let's start with setting up a connection with a database
-
-func init() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-	dbname := os.Getenv("DB_NAME")
-	dbuser := os.Getenv("DB_USER")
-	dbsecret := os.Getenv("DB_SECRET")
-
-	connectToDb(dbname, dbuser, dbsecret)
-}
-
-func connectToDb(name string, user string, secret string) {
-	// define connection string with db name, user and password
-	connStr := fmt.Sprintf("dbname=%s user=%s password=%s", name, user, secret)
-	// connect to db
-	db, err := sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Logged in successfully")
-
-	// close db connection once everything is done
-	// defer db.Close()
-
-	// Ping verifies a connection to the database is still alive, establishing a connection if necessary
-	// db.Ping()
-	// if err != nil {
-	//	log.Fatal(err)
-	//}
-}
-
 // let's write a proper ass processor
+type PSQLProcessor struct {
+	config *psqlConfig // config entity
+	cache  *sql.Stmt   // a struct to store a prepared statement and execute it when needed
+}
+
 type psqlConfig struct {
 	SomeOption string `json:"maildir_path"`
 }
@@ -74,11 +45,12 @@ type ProcessirShutdowner interface {
 }
 
 // The PSQLProcessor decorator [save emails to database]
-func PSQLProcessor() backends.Decorator {
+func PSQL() backends.Decorator {
 	var (
-		config *psqlConfig
-		db     *sql.DB
+		config *psqlConfig // config entity
+		db     *sql.DB     // database instance (i think)
 	)
+	p_psql := &PSQLProcessor{}
 
 	// init function loading config file
 	backends.Svc.AddInitializer(backends.InitializeWith(func(backendConfig backends.BackendConfig) error {
@@ -88,9 +60,24 @@ func PSQLProcessor() backends.Decorator {
 			return err
 		}
 		config := bcfg.(*psqlConfig)
+
+		// load env variables
+		err = godotenv.Load()
+		if err != nil {
+			log.Fatal("Error loading .env file")
+		}
+		dbname := os.Getenv("DB_NAME")
+		dbuser := os.Getenv("DB_USER")
+		dbsecret := os.Getenv("DB_SECRET")
+		// connect to database
+		db, err = p_psql.connectToDb(dbname, dbuser, dbsecret, db)
+		if err != nil {
+			return err
+		}
 		return nil
 	}))
 
+	// if there's a db connection, close it
 	backends.Svc.AddShutdowner(backends.ShutdownWith(func() error {
 		if db != nil {
 			return db.Close()
@@ -103,12 +90,50 @@ func PSQLProcessor() backends.Decorator {
 			func(e *mail.Envelope, task backends.SelectTask) (backends.Result, error) {
 				if task == backends.TaskSaveMail {
 					// use config somewhere here
+					// i think i can pass the table name in config as mail_table
 
-					// call the next processor in the chian
+					stmt := p_psql.prepareInsertQuery(db)
+					err := p_psql.executeQuery(db, stmt, &vals)
+					if err != nil {
+						return backends.NewResult(fmt.Sprint("554 Error: could not save email")), StorageError
+					}
+					// call the next processor in the chain
 					return p.Process(e, task)
 				}
 				return p.Process(e, task)
 			},
 		)
 	}
+}
+
+func (p_psql *PSQLProcessor) connectToDb(name string, user string, secret string, db *sql.DB) (*sql.DB, error) {
+	// define connection string with db name, user and password
+	connStr := fmt.Sprintf("dbname=%s user=%s password=%s", name, user, secret)
+	// connect to db
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Logged in successfully")
+	return db, err
+}
+
+func (p_psql *PSQLProcessor) prepareInsertQuery(db *sql.DB) *sql.Stmt {
+	insertQuery := `"INSERT INTO $1("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") 
+	VALUES($2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"`
+	// add query to stmt
+	cache, err := db.Prepare(insertQuery)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return cache
+}
+
+func (p_psql *PSQLProcessor) executeQuery(db *sql.DB, cache *sql.Stmt, vals *[]interface{}) error {
+	insertStmt := p_psql.prepareInsertQuery(db)
+	_, err := insertStmt.Exec(*vals...)
+	if err != nil {
+		fmt.Println("Failed to write data to the database: %s", err)
+	}
+	return err
 }
