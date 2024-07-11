@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/phires/go-guerrilla"
+	"github.com/ughhuh/go-email-server/backend"
 )
 
 var (
@@ -23,7 +24,7 @@ func serve() {
 	// cfg := &guerrilla.AppConfig{LogFile: log.OutputStdout.String()}
 
 	d := guerrilla.Daemon{}
-	d.AddProcessor("PSQL", PSQLProcessor)
+	d.AddProcessor("PSQL", backend.PSQL)
 
 	_, err := d.LoadConfig("../../config.json")
 	if err != nil {
