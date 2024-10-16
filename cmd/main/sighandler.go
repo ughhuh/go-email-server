@@ -5,7 +5,6 @@
 package main
 
 import (
-	"fmt"
 	"os/signal"
 	"syscall"
 )
@@ -18,7 +17,6 @@ func sigHandler() {
 			// fmt.Println("Caught signal SIGHUP")
 			d.Log().Info("Caught signal SIGHUP")
 		default:
-			fmt.Println("a weird signal caught, shutting down just in case")
 			d.Log().Warning("Caught signal ", signal.String())
 			d.Shutdown()
 			return

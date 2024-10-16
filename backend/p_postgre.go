@@ -7,15 +7,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
+
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/phires/go-guerrilla/backends"
+	"github.com/phires/go-guerrilla/log"
 	"github.com/phires/go-guerrilla/mail"
 )
 
@@ -33,6 +34,7 @@ import (
 type PSQLProcessor struct {
 	config *psqlConfig // config entity
 	cache  *sql.Stmt   // a struct to store a prepared statement and execute it when needed
+	logger log.Logger  // logger
 }
 
 type psqlConfig struct {
@@ -57,7 +59,10 @@ func PSQL() backends.Decorator {
 		db     *sql.DB     // database instance (i think)
 		vals   []interface{}
 	)
-	p_psql := &PSQLProcessor{}
+
+	p_psql := &PSQLProcessor{
+		logger: backends.Log(),
+	}
 
 	// init function loading config file
 	backends.Svc.AddInitializer(backends.InitializeWith(func(backendConfig backends.BackendConfig) error {
@@ -66,14 +71,16 @@ func PSQL() backends.Decorator {
 		if err != nil {
 			return err
 		}
+
 		config = bcfg.(*psqlConfig)
 		p_psql.config = config
 
 		// load env variables
 		err = godotenv.Load()
 		if err != nil {
-			log.Fatal("Error loading .env file")
+			p_psql.logger.Fatal("Failed to load ENV variables")
 		}
+
 		dbname := os.Getenv("DB_NAME")
 		dbuser := os.Getenv("DB_USER")
 		dbsecret := os.Getenv("DB_SECRET")
@@ -102,8 +109,9 @@ func PSQL() backends.Decorator {
 					if message_id == "" {
 						message_id = p_psql.generateMessageID(config.PrimaryHost)
 					}
+
 					from := p_psql.getAddressesFromHeader(e, "From")
-					to := p_psql.getAddressesFromHeader(e, "Message-Id")
+					to := p_psql.getAddressesFromHeader(e, "To")
 					reply_to := p_psql.getAddressesFromHeader(e, "Reply-To")
 					sender := p_psql.getAddressesFromHeader(e, "Sender")
 					recipients := p_psql.getRecipients(e)
@@ -111,7 +119,7 @@ func PSQL() backends.Decorator {
 
 					subject := e.Subject
 					body := p_psql.getMessageBody(e)
-					content_type := ""
+					content_type := "text/html"
 					if value, ok := e.Header["Content-Type"]; ok {
 						content_type = value[0]
 					}
@@ -119,20 +127,23 @@ func PSQL() backends.Decorator {
 					// let's build a list of values for the query
 					vals = []interface{}{} // clean slate
 					// add values
-					// order: table_name, "message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path
+					// order: "message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path
 					vals = append(vals,
 						message_id,
-						from,
-						to,
-						reply_to,
-						sender,
+						pq.Array(from),
+						pq.Array(to),
+						pq.Array(reply_to),
+						pq.Array(sender),
 						subject,
 						body,
-						content_type,
-						recipients,
+						content_type, // todo: add parsing to determine content type if none is present
+						pq.Array(recipients),
 						ip_addr,
 						return_path,
 					)
+					//for i, v := range vals {
+					//	log.Printf("Index %d: Value %v (Type %T)\n", i, v, v)
+					//}
 					// prepare query
 					stmt := p_psql.prepareInsertQuery(db)
 					// execute query
@@ -157,26 +168,27 @@ func (p_psql *PSQLProcessor) connectToDb(name string, user string, secret string
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Logged in successfully")
+	p_psql.logger.Info("Connected to database.")
 	return db, err
 }
 
 func (p_psql *PSQLProcessor) prepareInsertQuery(db *sql.DB) *sql.Stmt {
-	insertQuery := `"INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") 
-	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $0, $10, $11)"`
+	insertQuery := `INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") 
+	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	// add query to stmt
 	cache, err := db.Prepare(fmt.Sprintf(insertQuery, p_psql.config.Table))
 	if err != nil {
-		log.Fatal(err)
+		p_psql.logger.Fatal(err)
 	}
 	p_psql.cache = cache
 	return cache
 }
 
 func (p_psql *PSQLProcessor) executeQuery(cache *sql.Stmt, vals *[]interface{}) error {
+	p_psql.logger.Debug("Executing query with values %v", vals)
 	_, err := cache.Exec(*vals...)
 	if err != nil {
-		fmt.Printf("Failed to write data to the database: %s", err)
+		p_psql.logger.Warn("Failed to write data to the database: %s", err)
 	}
 	return err
 }
@@ -232,6 +244,7 @@ func (p_psql *PSQLProcessor) getMessageBody(e *mail.Envelope) string {
 	bodyReader := e.NewReader()
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
+		p_psql.logger.Warn("Failed to read email body.")
 		return ""
 	}
 	return string(body)

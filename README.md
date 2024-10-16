@@ -13,3 +13,8 @@
 - <https://www.digitalocean.com/community/tutorials/how-to-build-and-install-go-programs>
 
 - postgresql dsn string formats: https://stackoverflow.com/questions/3582552/what-is-the-format-for-the-postgresql-connection-string-url
+
+## Commands
+
+- Run email server: `go run .`
+- Run db: `psql -U postgres emaildb`

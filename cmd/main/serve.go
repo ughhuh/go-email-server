@@ -3,16 +3,17 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/phires/go-guerrilla"
+	"github.com/phires/go-guerrilla/backends"
 	"github.com/ughhuh/go-email-server/backend"
 )
 
 var (
 	signalChannel = make(chan os.Signal, 1) // a channel for storing signals
 	d             guerrilla.Daemon
+	logger        = backends.Log()
 )
 
 func init() {
@@ -28,14 +29,13 @@ func serve() {
 
 	_, err := d.LoadConfig("../../config.json")
 	if err != nil {
-		fmt.Println("Error loading config!")
-		fmt.Println(err)
+		logger.Fatalf("Failed to load configuration: %s\n", err)
 	}
 
 	err = d.Start()
 
 	if err != nil {
-		fmt.Println("start error", err)
+		logger.Fatalf("Failed to start daemon: %s\n", err)
 	}
 	// check max clients is OK
 
