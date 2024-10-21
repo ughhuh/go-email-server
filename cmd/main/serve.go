@@ -3,6 +3,7 @@
 package main
 
 import (
+	"log"
 	"os"
 
 	"github.com/phires/go-guerrilla"
@@ -13,7 +14,7 @@ import (
 var (
 	signalChannel = make(chan os.Signal, 1) // a channel for storing signals
 	d             guerrilla.Daemon
-	logger        = backends.Log()
+	logger        log.Logger
 )
 
 func init() {
@@ -32,6 +33,9 @@ func serve() {
 		logger.Fatalf("Failed to load configuration: %s\n", err)
 	}
 
+	ensureLogDirectory()
+	logger := backends.Log()
+
 	err = d.Start()
 
 	if err != nil {
@@ -41,4 +45,13 @@ func serve() {
 
 	// call signal handler
 	sigHandler()
+}
+
+func ensureLogDirectory() {
+	if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+		err := os.Mkdir("./logs", os.ModePerm)
+		if err != nil {
+			log.Fatalf("Failed to create log directory: %v", err)
+		}
+	}
 }

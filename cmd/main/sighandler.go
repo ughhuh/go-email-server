@@ -10,14 +10,23 @@ import (
 )
 
 func sigHandler() {
-	signal.Notify(signalChannel, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(signalChannel,
+		syscall.SIGHUP,
+		syscall.SIGQUIT,
+		syscall.SIGTERM,
+		syscall.SIGINT,
+		syscall.SIGABRT,
+	)
 	for signal := range signalChannel {
 		switch signal {
 		case syscall.SIGHUP:
-			// fmt.Println("Caught signal SIGHUP")
-			d.Log().Info("Caught signal SIGHUP")
+			d.Log().Infof("Caugh signal %s, reloading configuration file")
+			err := d.ReloadConfigFile("../../config.json")
+			if err != nil {
+				d.Log().Error("Failed to reload configuration file")
+			}
 		default:
-			d.Log().Warning("Caught signal ", signal.String())
+			d.Log().Warningf("Caught signal %s, initiating graceful shutdown", signal.String())
 			d.Shutdown()
 			return
 		}

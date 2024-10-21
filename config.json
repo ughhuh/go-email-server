@@ -1,22 +1,21 @@
 
 {
-    "log_file" : "./tests/testlog",
+    "log_file" : "./logs/email.log",
     "log_level" : "debug",
-    "allowed_hosts": ["spam4.me","grr.la"],
+    "allowed_hosts": ["iot-ticket.com","gmail.com", "vm4408.kaj.pouta.csc.fi"],
     "backend_config" :
         {
-            "primary_host" : "mail.example.com",
+            "primary_host" : "vm4408.kaj.pouta.csc.fi",
             "log_received_mails" : true,
             "save_process": "HeadersParser|Header|Hasher|Debugger|PSQL",
             "save_workers_size":  3,
             "sql_driver": "pq",
-            "sql_dsn": "postgresql://postgres:postgres@localhost/tododbname",
             "mail_table":"emails"
         },
     "servers" : [
         {
             "is_enabled" : true,
-            "host_name":"mail.guerrillamail.com",
+            "host_name":"vm4408.kaj.pouta.csc.fi",
             "max_size": 100017,
             "timeout":160,
             "listen_interface":"127.0.0.1:2526",

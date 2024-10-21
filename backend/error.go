@@ -1,11 +1,9 @@
 package backend
 
-import (
-	"errors"
-)
+import "fmt"
 
 type ServerError error
 
-var (
-	DatabaseError = ServerError(errors.New("database error"))
-)
+func DatabaseError(message string) ServerError {
+	return ServerError(fmt.Errorf("Database error: %s", message))
+}

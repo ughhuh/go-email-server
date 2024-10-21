@@ -144,12 +144,24 @@ func PSQL() backends.Decorator {
 					//for i, v := range vals {
 					//	log.Printf("Index %d: Value %v (Type %T)\n", i, v, v)
 					//}
+					// get a list of to and recepients
+					// check if any in database
+
+					db_recepients, err := p_psql.getValidRecepients(db, append(to, recipients...))
+					// if not return backends error invalid recepient
+					if err != nil {
+						return backends.NewResult("403 Error: invalid recepient"), err
+					}
 					// prepare query
 					stmt := p_psql.prepareInsertQuery(db)
 					// execute query
-					err := p_psql.executeQuery(stmt, &vals)
+					err = p_psql.executeQuery(stmt, &vals)
 					if err != nil {
-						return backends.NewResult("554 Error: could not save email"), DatabaseError
+						return backends.NewResult("554 Error: could not save email"), err
+					}
+					// idk how but get new email id and create inbox entry for each valid recepient
+					for _, v := range db_recepients {
+						p_psql.insertInboxEntry(db, v, message_id)
 					}
 					// call the next processor in the chain
 					return p.Process(e, task)
@@ -248,6 +260,48 @@ func (p_psql *PSQLProcessor) getMessageBody(e *mail.Envelope) string {
 		return ""
 	}
 	return string(body)
+}
+
+// borrowed from https://github.com/juliangruber/go-intersect/blob/master/intersect.go
+func (p_psql *PSQLProcessor) getValidRecepients(db *sql.DB, recepients []string) ([]string, error) {
+	// get list of recepients
+	// get list of inboxes from db
+	rows, err := db.Query(`SELECT email_address FROM users;`)
+	if err != nil {
+		p_psql.logger.Warnln("Failed to fetch inboxes from database: %s", err)
+	}
+	var inboxes []string
+	for rows.Next() {
+		var email string
+		err := rows.Scan(&email)
+		if err != nil {
+			p_psql.logger.Fatalln(err)
+		}
+		inboxes = append(inboxes, email)
+	}
+	// find overlap
+	set := make([]string, 0)
+	hash := make(map[string]struct{})
+	for _, v := range recepients {
+		hash[v] = struct{}{}
+	}
+	for _, v := range inboxes {
+		if _, ok := hash[v]; ok {
+			set = append(set, v)
+		}
+	}
+	if len(set) == 0 {
+		return nil, DatabaseError("No valid email recepients found.")
+	}
+	return set, nil
+}
+
+func (p_psql *PSQLProcessor) insertInboxEntry(db *sql.DB, email string, message_id string) {
+	query := `INSERT INTO inboxes (user_id, mail_id) VALUES ($1, $2)`
+	_, err := db.Exec(query, email, message_id)
+	if err != nil {
+		p_psql.logger.Warnf("Failed to create inbox entry! message_id %[1] for email %[2]", message_id, email)
+	}
 }
 
 // yeah i stole it and i don't care: https://github.com/emersion/go-message/blob/v0.18.1/mail/header.go#L338
