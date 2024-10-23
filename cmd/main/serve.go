@@ -15,27 +15,23 @@ var (
 	signalChannel = make(chan os.Signal, 1) // a channel for storing signals
 	d             guerrilla.Daemon
 	logger        log.Logger
+	configFile    string
 )
 
-func init() {
-	// confirm config file exists
-}
-
-func serve() {
+func serve(cfile string, ldir string) {
 	// start server
 	// cfg := &guerrilla.AppConfig{LogFile: log.OutputStdout.String()}
+	ensureLogDirectory(ldir)
+	logger := backends.Log()
 
+	configFile := cfile
 	d := guerrilla.Daemon{}
 	d.AddProcessor("PSQL", backend.PSQL)
 
-	_, err := d.LoadConfig("../../config.json")
+	_, err := d.LoadConfig(configFile)
 	if err != nil {
 		logger.Fatalf("Failed to load configuration: %s\n", err)
 	}
-
-	ensureLogDirectory()
-	logger := backends.Log()
-
 	err = d.Start()
 
 	if err != nil {
@@ -47,9 +43,9 @@ func serve() {
 	sigHandler()
 }
 
-func ensureLogDirectory() {
-	if _, err := os.Stat("./logs"); os.IsNotExist(err) {
-		err := os.Mkdir("./logs", os.ModePerm)
+func ensureLogDirectory(logdir string) {
+	if _, err := os.Stat(logdir); os.IsNotExist(err) {
+		err := os.Mkdir(logdir, os.ModePerm)
 		if err != nil {
 			log.Fatalf("Failed to create log directory: %v", err)
 		}

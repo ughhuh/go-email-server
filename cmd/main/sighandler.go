@@ -20,8 +20,8 @@ func sigHandler() {
 	for signal := range signalChannel {
 		switch signal {
 		case syscall.SIGHUP:
-			d.Log().Infof("Caugh signal %s, reloading configuration file")
-			err := d.ReloadConfigFile("../../config.json")
+			d.Log().Infof("Caught signal %s, reloading configuration file")
+			err := d.ReloadConfigFile(configFile)
 			if err != nil {
 				d.Log().Error("Failed to reload configuration file")
 			}
@@ -31,5 +31,4 @@ func sigHandler() {
 			return
 		}
 	}
-
 }
