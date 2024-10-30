@@ -17,4 +17,4 @@ require (
 	golang.org/x/tools v0.23.0 // indirect
 )
 
-replace github.com/ughhuh/go-email-server/backend v0.0.0 => ../backend
+replace github.com/ughhuh/go-email-server/backend v0.0.0 => ./backend

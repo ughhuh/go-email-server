@@ -1,9 +1,5 @@
 # Email Server RoboGopher
 
-![Soviet rabbit robot](https://mir-s3-cdn-cf.behance.net/project_modules/disp/983ab212081311.562570ed3f6a2.jpg)
-
-![Gopher robot](https://i.pinimg.com/736x/8c/bb/22/8cbb2269f06c8f82627adbfbbad5dcc3.jpg)
-
 ## Table Of Contents
 
 - [Setup](#setup)
@@ -17,4 +13,35 @@
 ## Commands
 
 - Run email server: `go run .`
-- Run db: `psql -U postgres emaildb`
+
+### Docker
+
+Build Docker image:
+
+```bash
+docker build --tag docker-email-server .
+```
+
+Run Docker container:
+
+```bash
+docker run docker-email-server --config=config.json --logdir=./logs
+```
+
+Server listens on port 25 by default. Connect using `--network=host.docker.internal` for host machine localhost and `--network=network-name` for Docker bridge network.
+
+Map ports with `--publish 25:25`.
+
+Listen on `host.docker.internal` for local testing, on `0.0.0.0` when deployed.
+
+Mount config: `--mount type=bind,source="C:\Users\alegal\Desktop\thesis\go-email-server/config.json",target=/config.json`
+
+Mount logs: `--mount type=bind,source="path/to/logs",target=/logs`
+
+Source is in the host machine, target is in the container.
+
+## Logs
+
+Log levels are: `debug`, `info`, `error`, `warn`, `fatal`, `panic`
+
+docker context create csc-server --description "Thesis server" --docker "host=ssh://128.214.255.97"

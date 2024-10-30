@@ -5,6 +5,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/phires/go-guerrilla"
 	"github.com/phires/go-guerrilla/backends"
@@ -18,10 +19,9 @@ var (
 	configFile    string
 )
 
-func serve(cfile string, ldir string) {
+func serve(cfile string) {
 	// start server
 	// cfg := &guerrilla.AppConfig{LogFile: log.OutputStdout.String()}
-	ensureLogDirectory(ldir)
 	logger := backends.Log()
 
 	configFile := cfile
@@ -32,6 +32,9 @@ func serve(cfile string, ldir string) {
 	if err != nil {
 		logger.Fatalf("Failed to load configuration: %s\n", err)
 	}
+
+	ensureLogDirectory(d.Config.LogFile)
+
 	err = d.Start()
 
 	if err != nil {
@@ -43,11 +46,16 @@ func serve(cfile string, ldir string) {
 	sigHandler()
 }
 
-func ensureLogDirectory(logdir string) {
-	if _, err := os.Stat(logdir); os.IsNotExist(err) {
-		err := os.Mkdir(logdir, os.ModePerm)
+func ensureLogDirectory(logfile string) {
+	// Extract the directory path from the logfile
+	dir := filepath.Dir(logfile)
+
+	// Check if the directory exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		// Create the directory with appropriate permissions
+		err := os.MkdirAll(dir, 0755)
 		if err != nil {
-			log.Fatalf("Failed to create log directory: %v", err)
+			logger.Fatalf("failed to create directory: %s", err)
 		}
 	}
 }

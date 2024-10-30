@@ -1,8 +1,8 @@
 
 {
     "log_file" : "./logs/email.log",
-    "log_level" : "info",
-    "allowed_hosts":  ["iot-ticket.com","wapice.com","smtp.pouta.csc.fi","vm4408.kaj.pouta.csc.fi"],
+    "log_level" : "debug",
+    "allowed_hosts":  ["gmail.com","vm4408.kaj.pouta.csc.fi"],
     "backend_config" :
         {
             "primary_host" : "vm4408.kaj.pouta.csc.fi",

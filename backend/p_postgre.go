@@ -78,14 +78,11 @@ func PSQL() backends.Decorator {
 		// load env variables
 		err = godotenv.Load()
 		if err != nil {
-			p_psql.logger.Fatal("Failed to load ENV variables")
+			p_psql.logger.Warn("Failed to load ENV variables")
 		}
 
-		dbname := os.Getenv("DB_NAME")
-		dbuser := os.Getenv("DB_USER")
-		dbsecret := os.Getenv("DB_SECRET")
 		// connect to database
-		db, err = p_psql.connectToDb(dbname, dbuser, dbsecret)
+		db, err = p_psql.connectToDb(os.Getenv("DB_HOST"), os.Getenv("DB_NAME"), os.Getenv("DB_USER"), os.Getenv("DB_SECRET"), os.Getenv("DB_SSLMODE"))
 		if err != nil {
 			return err
 		}
@@ -172,9 +169,9 @@ func PSQL() backends.Decorator {
 	}
 }
 
-func (p_psql *PSQLProcessor) connectToDb(name string, user string, secret string) (*sql.DB, error) {
+func (p_psql *PSQLProcessor) connectToDb(host string, name string, user string, secret string, sslmode string) (*sql.DB, error) {
 	// define connection string with db name, user and password
-	connStr := fmt.Sprintf("dbname=%s user=%s password=%s sslmode=disable", name, user, secret)
+	connStr := fmt.Sprintf("host=%s dbname=%s user=%s password=%s sslmode=%s", host, name, user, secret, sslmode)
 	// connect to db
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
