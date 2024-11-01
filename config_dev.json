@@ -7,7 +7,7 @@
         {
             "primary_host" : "vm4408.kaj.pouta.csc.fi",
             "log_received_mails" : true,
-            "save_process": "HeadersParser|Header|Hasher|Debugger|PSQL",
+            "save_process": "HeadersParser|Header|Debugger|MimeParser|PSQL",
             "save_workers_size":  3,
             "sql_driver": "pq",
             "mail_table":"emails"
@@ -18,7 +18,7 @@
             "host_name":"vm4408.kaj.pouta.csc.fi",
             "max_size": 100017,
             "timeout":160,
-            "listen_interface":"0.0.0.0:25",
+            "listen_interface":"0.0.0.0:2526",
             "start_tls_on":false,
             "tls_always_on":false,
             "max_clients": 2

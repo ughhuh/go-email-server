@@ -27,6 +27,7 @@ func serve(cfile string) {
 	configFile := cfile
 	d := guerrilla.Daemon{}
 	d.AddProcessor("PSQL", backend.PSQL)
+	d.AddProcessor("MimeParser", backend.MimeParser)
 
 	_, err := d.LoadConfig(configFile)
 	if err != nil {

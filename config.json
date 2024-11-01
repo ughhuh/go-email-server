@@ -7,7 +7,7 @@
         {
             "primary_host" : "vm4408.kaj.pouta.csc.fi",
             "log_received_mails" : true,
-            "save_process": "HeadersParser|Header|Hasher|Debugger|PSQL",
+            "save_process": "HeadersParser|Header|Debugger|MimeParser|PSQL",
             "save_workers_size":  3,
             "sql_driver": "pq",
             "mail_table":"emails"

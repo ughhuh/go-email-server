@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jhillyerd/enmime"
 	"github.com/joho/godotenv"
 	"github.com/lib/pq"
 	"github.com/phires/go-guerrilla/backends"
@@ -48,7 +49,7 @@ type ProcessorIntiitializer interface {
 }
 
 // processor shutdown function
-type ProcessirShutdowner interface {
+type ProcessorShutdowner interface {
 	Shutdown() error
 }
 
@@ -115,11 +116,27 @@ func PSQL() backends.Decorator {
 					return_path := p_psql.getAddressFromHeader(e, "Return-Path")
 
 					subject := e.Subject
-					body := p_psql.getMessageBody(e)
-					content_type := "text/html"
-					if value, ok := e.Header["Content-Type"]; ok {
-						content_type = value[0]
+					var body, content_type string
+					env_mime, ok := e.Values["envelope_mime"].(*enmime.Envelope)
+					if ok {
+						p_psql.logger.Debug("Using MIME")
+						content_type = env_mime.Root.ContentType
+						if strings.Contains(content_type, "plain") {
+							body = env_mime.Text
+						} else if strings.Contains(content_type, "html") {
+							body = env_mime.HTML
+						}
+					} else {
+						p_psql.logger.Debug("Default")
+						// use defaults from guerilla envelope
+						if value, ok := e.Header["Content-Type"]; ok {
+							content_type = value[0]
+						}
+						body = p_psql.getMessageStr(e) // entire message as default
 					}
+
+					p_psql.logger.Debug(body)
+					p_psql.logger.Debug(content_type)
 					ip_addr := e.RemoteIP
 					// let's build a list of values for the query
 					vals = []interface{}{} // clean slate
@@ -247,13 +264,12 @@ func (p_psql *PSQLProcessor) getRecipients(e *mail.Envelope) []string {
 	return recipients
 }
 
-// there literally isn't a good way to get this shit to work with guerilla
-// so yeah fingers crossed i hope it works
-func (p_psql *PSQLProcessor) getMessageBody(e *mail.Envelope) string {
+// god bless this fella: https://pkg.go.dev/github.com/jhillyerd/enmime#Envelope
+func (p_psql *PSQLProcessor) getMessageStr(e *mail.Envelope) string {
 	bodyReader := e.NewReader()
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
-		p_psql.logger.Warn("Failed to read email body.")
+		p_psql.logger.Warn("Failed to read email message.")
 		return ""
 	}
 	return string(body)
