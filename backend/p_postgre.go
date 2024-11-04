@@ -31,8 +31,20 @@ import (
 // input: header, mailfrom, subject
 // output: idk, saves email i guess
 
+// ----------------------------------------------------------------------------------
+// Processor Name: todooo
+// ----------------------------------------------------------------------------------
+// Description   : Parses the header using e.ParseHeaders()
+// ----------------------------------------------------------------------------------
+// Config Options: none
+// --------------:-------------------------------------------------------------------
+// Input         : envelope
+// ----------------------------------------------------------------------------------
+// Output        : Headers will be populated in e.Header
+// ----------------------------------------------------------------------------------
+
 // let's write a proper ass processor
-type PSQLProcessor struct {
+type PSQL struct {
 	config *psqlConfig // config entity
 	cache  *sql.Stmt   // a struct to store a prepared statement and execute it when needed
 	logger log.Logger  // logger
@@ -54,14 +66,14 @@ type ProcessorShutdowner interface {
 }
 
 // The PSQLProcessor decorator [save emails to database]
-func PSQL() backends.Decorator {
+var PSQLProcessor = func() backends.Decorator {
 	var (
 		config *psqlConfig // config entity
 		db     *sql.DB     // database instance (i think)
 		vals   []interface{}
 	)
 
-	p_psql := &PSQLProcessor{
+	p_psql := &PSQL{
 		logger: backends.Log(),
 	}
 
@@ -186,7 +198,7 @@ func PSQL() backends.Decorator {
 	}
 }
 
-func (p_psql *PSQLProcessor) connectToDb(host string, name string, user string, secret string, sslmode string) (*sql.DB, error) {
+func (p_psql *PSQL) connectToDb(host string, name string, user string, secret string, sslmode string) (*sql.DB, error) {
 	// define connection string with db name, user and password
 	connStr := fmt.Sprintf("host=%s dbname=%s user=%s password=%s sslmode=%s", host, name, user, secret, sslmode)
 	// connect to db
@@ -198,7 +210,7 @@ func (p_psql *PSQLProcessor) connectToDb(host string, name string, user string, 
 	return db, err
 }
 
-func (p_psql *PSQLProcessor) prepareInsertQuery(db *sql.DB) *sql.Stmt {
+func (p_psql *PSQL) prepareInsertQuery(db *sql.DB) *sql.Stmt {
 	insertQuery := `INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") 
 	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	// add query to stmt
@@ -210,7 +222,7 @@ func (p_psql *PSQLProcessor) prepareInsertQuery(db *sql.DB) *sql.Stmt {
 	return cache
 }
 
-func (p_psql *PSQLProcessor) executeQuery(cache *sql.Stmt, vals *[]interface{}) error {
+func (p_psql *PSQL) executeQuery(cache *sql.Stmt, vals *[]interface{}) error {
 	p_psql.logger.Debug("Executing query with values %v", vals)
 	_, err := cache.Exec(*vals...)
 	if err != nil {
@@ -219,7 +231,7 @@ func (p_psql *PSQLProcessor) executeQuery(cache *sql.Stmt, vals *[]interface{}) 
 	return err
 }
 
-func (p_psql *PSQLProcessor) getAddressFromHeader(e *mail.Envelope, headerKey string) string {
+func (p_psql *PSQL) getAddressFromHeader(e *mail.Envelope, headerKey string) string {
 	value, ok := e.Header[headerKey]
 	if ok {
 		// so, why this? e.Header is set by ParseHeaders(): e.Header, err = headerReader.ReadMIMEHeader()
@@ -240,7 +252,7 @@ func (p_psql *PSQLProcessor) getAddressFromHeader(e *mail.Envelope, headerKey st
 }
 
 // handle multiple addresses
-func (p_psql *PSQLProcessor) getAddressesFromHeader(e *mail.Envelope, headerKey string) []string {
+func (p_psql *PSQL) getAddressesFromHeader(e *mail.Envelope, headerKey string) []string {
 	values, ok := e.Header[headerKey]
 	if ok {
 		var addresses []string
@@ -256,7 +268,7 @@ func (p_psql *PSQLProcessor) getAddressesFromHeader(e *mail.Envelope, headerKey 
 	return nil
 }
 
-func (p_psql *PSQLProcessor) getRecipients(e *mail.Envelope) []string {
+func (p_psql *PSQL) getRecipients(e *mail.Envelope) []string {
 	var recipients []string
 	for _, rcpt := range e.RcptTo {
 		recipients = append(recipients, rcpt.String())
@@ -265,7 +277,7 @@ func (p_psql *PSQLProcessor) getRecipients(e *mail.Envelope) []string {
 }
 
 // god bless this fella: https://pkg.go.dev/github.com/jhillyerd/enmime#Envelope
-func (p_psql *PSQLProcessor) getMessageStr(e *mail.Envelope) string {
+func (p_psql *PSQL) getMessageStr(e *mail.Envelope) string {
 	bodyReader := e.NewReader()
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
@@ -276,7 +288,7 @@ func (p_psql *PSQLProcessor) getMessageStr(e *mail.Envelope) string {
 }
 
 // borrowed from https://github.com/juliangruber/go-intersect/blob/master/intersect.go
-func (p_psql *PSQLProcessor) getValidRecepients(db *sql.DB, recepients []string) ([]string, error) {
+func (p_psql *PSQL) getValidRecepients(db *sql.DB, recepients []string) ([]string, error) {
 	// get list of recepients
 	// get list of inboxes from db
 	rows, err := db.Query(`SELECT email_address FROM users;`)
@@ -309,7 +321,7 @@ func (p_psql *PSQLProcessor) getValidRecepients(db *sql.DB, recepients []string)
 	return set, nil
 }
 
-func (p_psql *PSQLProcessor) insertInboxEntry(db *sql.DB, email string, message_id string) {
+func (p_psql *PSQL) insertInboxEntry(db *sql.DB, email string, message_id string) {
 	query := `INSERT INTO inboxes (user_id, mail_id) VALUES ($1, $2)`
 	_, err := db.Exec(query, email, message_id)
 	if err != nil {
@@ -318,7 +330,7 @@ func (p_psql *PSQLProcessor) insertInboxEntry(db *sql.DB, email string, message_
 }
 
 // yeah i stole it and i don't care: https://github.com/emersion/go-message/blob/v0.18.1/mail/header.go#L338
-func (p_psql *PSQLProcessor) generateMessageID(hostname string) string {
+func (p_psql *PSQL) generateMessageID(hostname string) string {
 	now := uint64(time.Now().UnixNano())
 	nonceByte := make([]byte, 8)
 	nonce := binary.BigEndian.Uint64(nonceByte)

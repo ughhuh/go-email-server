@@ -30,13 +30,13 @@ docker run docker-email-server --config=config.json --logdir=./logs
 
 Server listens on port 25 by default. Connect using `--network=host.docker.internal` for host machine localhost and `--network=network-name` for Docker bridge network.
 
-Map ports with `--publish 25:25`.
+Map ports with `--publish host-port:target-port`.
 
 Listen on `host.docker.internal` for local testing, on `0.0.0.0` when deployed.
 
-Mount config: `--mount type=bind,source="C:\Users\alegal\Desktop\thesis\go-email-server/config.json",target=/config.json`
+Mount configuration file: `--mount type=bind,source="path/to/go-email-server/config.json",target=/config.json`
 
-Mount logs: `--mount type=bind,source="path/to/logs",target=/logs`
+Mount logs folder: `--mount type=bind,source="path/to/logs",target=/logs`
 
 Source is in the host machine, target is in the container.
 
@@ -44,4 +44,4 @@ Source is in the host machine, target is in the container.
 
 Log levels are: `debug`, `info`, `error`, `warn`, `fatal`, `panic`
 
-docker context create csc-server --description "Thesis server" --docker "host=ssh://128.214.255.97"
+

@@ -7,12 +7,27 @@ import (
 	"github.com/phires/go-guerrilla/mail"
 )
 
-type MimeParserProcessor struct {
+// ----------------------------------------------------------------------------------
+// Processor Name: MimeParser
+// ----------------------------------------------------------------------------------
+// Description   : Parse the envelope to enmime Envelope
+// ----------------------------------------------------------------------------------
+// Config Options: None
+// --------------:-------------------------------------------------------------------
+// Input         : e *mail.Envelope
+// ----------------------------------------------------------------------------------
+// Output        : Envelope is saved to e.Values["envelope_mime"]
+//
+//	: enmime Envelope documentation: https://pkg.go.dev/github.com/jhillyerd/enmime#Envelope
+//
+// ----------------------------------------------------------------------------------
+
+type MimeParser struct {
 	logger log.Logger
 }
 
-func MimeParser() backends.Decorator {
-	p_mime := &MimeParserProcessor{
+var MimeParserProcessor = func() backends.Decorator {
+	p_mime := &MimeParser{
 		logger: backends.Log(),
 	}
 
