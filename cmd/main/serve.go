@@ -20,40 +20,41 @@ var (
 )
 
 func serve(cfile string) {
-	// start server
-	// cfg := &guerrilla.AppConfig{LogFile: log.OutputStdout.String()}
+	// set logger
 	logger := backends.Log()
 
-	configFile := cfile
+	// create daemon and add custom processors
 	d := guerrilla.Daemon{}
 	d.AddProcessor("PSQL", backend.PSQLProcessor)
 	d.AddProcessor("MimeParser", backend.MimeParserProcessor)
 
+	// load configuration
+	configFile := cfile
 	_, err := d.LoadConfig(configFile)
 	if err != nil {
 		logger.Fatalf("Failed to load configuration: %s\n", err)
 	}
 
+	// create a directory for logs if needed
 	ensureLogDirectory(d.Config.LogFile)
 
+	// start daemon
 	err = d.Start()
-
 	if err != nil {
 		logger.Fatalf("Failed to start daemon: %s\n", err)
 	}
-	// check max clients is OK
 
 	// call signal handler
 	sigHandler()
 }
 
 func ensureLogDirectory(logfile string) {
-	// Extract the directory path from the logfile
+	// extract the directory path from the logfile
 	dir := filepath.Dir(logfile)
 
-	// Check if the directory exists
+	// check if the directory exists
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		// Create the directory with appropriate permissions
+		// create the directory with appropriate permissions
 		err := os.MkdirAll(dir, 0755)
 		if err != nil {
 			logger.Fatalf("failed to create directory: %s", err)

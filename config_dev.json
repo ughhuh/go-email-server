@@ -5,11 +5,10 @@
     "allowed_hosts":  ["gmail.com","vm4408.kaj.pouta.csc.fi"],
     "backend_config" :
         {
-            "primary_host" : "vm4408.kaj.pouta.csc.fi",
+            "primary_mail_host" : "vm4408.kaj.pouta.csc.fi",
             "log_received_mails" : true,
-            "save_process": "HeadersParser|Header|Debugger|MimeParser|PSQL",
+            "save_process": "HeadersParser|Header|MimeParser|PSQL",
             "save_workers_size":  3,
-            "sql_driver": "pq",
             "mail_table":"emails"
         },
     "servers" : [

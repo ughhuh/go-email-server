@@ -3,12 +3,9 @@ package main
 import "flag"
 
 func main() {
-	// get config from cmd
+	// get config from cmd and load into system
 	var cflag string
-	// var lflag string
 	flag.StringVar(&cflag, "config", "config.json", "configuration file with path")
-	// flag.StringVar(&lflag, "logdir", "./logs", "log directory path")
 	flag.Parse()
-	// pass to serve
 	serve(cflag)
 }
