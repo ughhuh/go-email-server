@@ -115,6 +115,9 @@ var PSQLProcessor = func() backends.Decorator {
 		return nil
 	}))
 
+	// future development note: envelope Header type is map[string][]string (aka key is string, vlaue is a string slice),
+	// so when extracting header values like Message-Id, don't forget to use [0] to get the string value.
+
 	return func(p backends.Processor) backends.Processor {
 		return backends.ProcessWith(
 			func(e *mail.Envelope, task backends.SelectTask) (backends.Result, error) {

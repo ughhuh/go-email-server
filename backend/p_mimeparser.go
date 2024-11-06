@@ -45,12 +45,8 @@ var MimeParserProcessor = func() backends.Decorator {
 
 					// save enmime Envelope to the guerilla envelope
 					e.Values["envelope_mime"] = env
-					// next processor
-					return p.Process(e, task)
-				} else {
-					// next processor
-					return p.Process(e, task)
 				}
+				return p.Process(e, task)
 			})
 	}
 }
