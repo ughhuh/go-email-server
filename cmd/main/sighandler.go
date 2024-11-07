@@ -1,7 +1,3 @@
-// signal handler handles signals sent by processes
-// https://pkg.go.dev/syscall
-// signals are sent to the signal channel
-
 package main
 
 import (
@@ -9,6 +5,7 @@ import (
 	"syscall"
 )
 
+// Listen for system signals and handle them accordingly
 func sigHandler() {
 	signal.Notify(signalChannel,
 		syscall.SIGHUP,

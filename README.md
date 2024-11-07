@@ -85,13 +85,8 @@ Example configuration file:
 
 todo
 
-- document the steps performed in the PSQL processor and quickly explain PSQL methods
-- document the steps performed in the MIME parser
 - in thesis mention how processor decoration is done with ProcessorConstructor
-- revisit all comments in files and convert them into documentation
-- briefly explain default processor functionalities
-- document database connecting
-- document database queries performed
+- revisit all comments in files and clean up docstrings
 - document future improvements
 
 ## Processors
@@ -247,29 +242,7 @@ the decoration is done the same way as in mime parser processor with a few addit
 
 the initializer is the function that is executed when the backend is initialized by the gateway. similarly, shutdowner is a function that is executed when the backend is being shut down by the gateway.
 
-to add the initializer to the backend, function `backends.Svc.AddInitializer` is called. it adds a function that implements `processorInitializer` interface. so yeah we have the `backends.InitializeWith()` anonymous function for that. it wraps anonymous function that matches the `Initialize` function signature. This function is passed the configuration object containing data from the configuration file, which allows the initializer function to access the parameters defined in the configuration file. this same function contains database intiialization.
-
-```go
-type processorInitializer interface {
-  Initialize(backendConfig BackendConfig) error
-}
-
-type InitializeWith func(backendConfig BackendConfig) error
-
-// Satisfy ProcessorInitializer interface
-// So we can now pass an anonymous function that implements ProcessorInitializer
-func (i InitializeWith) Initialize(backendConfig BackendConfig) error {
-  // delegate to the anonymous function
-  return i(backendConfig)
-}
-
-// AddInitializer adds a function that implements ProcessorShutdowner to be called when initializing
-func (s *service) AddInitializer(i processorInitializer) {
-  s.Lock()
-  defer s.Unlock()
-  s.initializers = append(s.initializers, i)
-}
-```
+An initializer can be registered using `backends.Svc.AddInitializer` function that registers any function that implements `processorInitializer` interface. This function will be executed when the backend is initialized. `backends.InitializeWith` type implements the `processorInitializer` interface and its `Initialize()` method just calls the `InitializeWith` function. Passing the anonymous function with initialization logic to `backends.IntializeWith` ensures the function meets the initializer requirements and can utilize backend configuration during its execution.
 
 ```go
 var PSQLProcessor = func() backends.Decorator {
@@ -280,42 +253,92 @@ var PSQLProcessor = func() backends.Decorator {
 }
 ```
 
-Shutdowner works about the same, except the function is executed during the backend shutdown and it doesn't require the `backends.BackendConfig`.
-
 ```go
-type processorShutdowner interface {
-  Shutdown() error
+type processorInitializer interface {
+  Initialize(backendConfig BackendConfig) error
 }
 
-type ShutdownWith func() error
+type InitializeWith func(backendConfig BackendConfig) error
 
-// satisfy ProcessorShutdowner interface, same concept as InitializeWith type
-func (s ShutdownWith) Shutdown() error {
-  // delegate
-  return s()
+func (i InitializeWith) Initialize(backendConfig BackendConfig) error {
+  // delegate to the anonymous function
+  return i(backendConfig)
 }
 
-// AddShutdowner adds a function that implements ProcessorShutdowner to be called when shutting down
-func (s *service) AddShutdowner(sh processorShutdowner) {
+func (s *service) AddInitializer(i processorInitializer) {
   s.Lock()
   defer s.Unlock()
-  s.shutdowners = append(s.shutdowners, sh)
+  s.initializers = append(s.initializers, i)
 }
 ```
 
+Shutdown acts as a sister function to the initializer and mirrors its definition and execution logic.
+
+Onto next thing: the email saving. so first i get the data from the envelope that was inserted by the previous processors. so yeah as you can see i fetch stuff like message id, from, to, reply to, sender, recipients, return path, subject from the guerilla envelope. notably, all of these are headers. i verify the validity of the headers using `getAddressesFromHeader` method, which fetches the address slice from the `Header` field of the guerilla `Envelope` and attempts to parse each of them into a RFC5322 email address.
+
 ```go
-var PSQLProcessor = func() backends.Decorator {
-  backends.Svc.AddShutdowner(backends.ShutdownWith(func() error {
-    if db != nil {
-      return db.Close()
+  var message_id string
+  message_id_header, ok := e.Header["Message-Id"]
+  if ok {
+    message_id = message_id_header[0]
+  } else {
+    message_id = p_psql.generateMessageID(config.PrimaryHost)
+  }
+
+  from := p_psql.getAddressesFromHeader(e, "From")
+  to := p_psql.getAddressesFromHeader(e, "To")
+  reply_to := p_psql.getAddressesFromHeader(e, "Reply-To")
+  sender := p_psql.getAddressesFromHeader(e, "Sender")
+  recipients := p_psql.getRecipients(e)
+  return_path := p_psql.getAddressFromHeader(e, "Return-Path")
+  ip_addr := e.RemoteIP
+  subject := e.Subject
+```
+
+so yeah next i check if the mime parser was executed. if yes, i fetch email's content type and corresponding type. only the plain text and html parts of the enmime `Envelope` are saved. if you wish to extend the service to save attachments and other media to the database, then you can retrieve the `enmime.Part`s from the `env_mime` variable set on the line 2.
+
+```go
+  var body, content_type string
+  env_mime, ok := e.Values["envelope_mime"].(*enmime.Envelope)
+  if ok {
+    content_type = env_mime.Root.ContentType
+    if strings.Contains(content_type, "plain") {
+      body = env_mime.Text
+    } else if strings.Contains(content_type, "html") {
+      body = env_mime.HTML
     }
-    return nil
-  }))
-  // the rest of the processor
-}
+  } else {
+    if value, ok := e.Header["Content-Type"]; ok {
+      content_type = value[0]
+    }
+    body = p_psql.getMessageStr(e) // entire message as default
+  }
 ```
 
+after all the data is fetched from the `guerilla.Envelope`, i create aan empty slice and append values to it in the order that they're written to the database.
 
 ```go
+  vals = []interface{}{} // clean slate
 
+  vals = append(vals,
+    message_id,
+    pq.Array(from),
+    pq.Array(to),
+    pq.Array(reply_to),
+    pq.Array(sender),
+    subject,
+    body,
+    content_type,
+    pq.Array(recipients),
+    ip_addr,
+    return_path,
+  )
 ```
+
+so since the recipient and to fields in the database aren't set as foreign keys, i need to perform the check manually to ensure that the recipient is a valid user, and that the at least one of the To addresses is a valid user. i recall you need to separate the checks since the recipient can be registered if the smtp message is sent over the localhost. in short, i fetch email addresses from the users table, save them as a slice, and then find the intersection between the slices by trying to fetch each `recipient` from the database email list, and if the action succeeds, i save the recipient in the `set` slice. if the slice isn't empty at the end, then there must be at least one valid recipient.
+
+then i prepare a rather simple insert query `INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)` in `prepareInsertQuery()`. if you decide to change the columns in the emails table, then this query needs to be updated. use `$X` syntax to ensure the safe insertion of the data into the query. then the email is written to the database. an entry is then created in the inbox table to link the email message to the user receiving it.
+
+so, the thing is that when an email is sent to 2 addresses on the same server, it is received as one email with 2 recipients. Example log: `"Mail from: alena.galysheva@gmail.com / to: [{af2db5b2-c743-4442-a7d8-c74afaf26907 vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false} {tester vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false}]"`. this is why we have the middle table to associate the email with two valid recipients. this is why the recipients needs to be verified, and the record should be created for each. there can also be recipients to like other services but that's okay since the getValidRecipients returns the ones present in the database and doesn't raise error as long as there's at least 1 valid recipient present.
+
+10:15-13:15, 14:15-16:30, 17:00-18:00

@@ -35,15 +35,14 @@ var MimeParserProcessor = func() backends.Decorator {
 		return backends.ProcessWith(
 			func(e *mail.Envelope, task backends.SelectTask) (backends.Result, error) {
 				if task == backends.TaskSaveMail {
-					// read envelope to enmime envelope
+					// read guerilla envelope to enmime envelope
 					envReader := e.NewReader()
-
 					env, err := enmime.ReadEnvelope(envReader)
 					if err != nil {
 						p_mime.logger.Warn("Failed to parse email to MIME envelope.")
 					}
 
-					// save enmime Envelope to the guerilla envelope
+					// save enmime Envelope to the Values field of the guerilla envelope
 					e.Values["envelope_mime"] = env
 				}
 				return p.Process(e, task)

@@ -21,12 +21,6 @@ import (
 	"github.com/phires/go-guerrilla/mail"
 )
 
-// config instructions: https://github.com/phires/go-guerrilla/wiki/Backends,-configuring-and-extending#extending
-
-// use initializer to open DB connection: https://github.com/phires/go-guerrilla/wiki/Backends,-configuring-and-extending#processor-initialization
-
-// maybe use shutdown to terminate DB connection: https://github.com/phires/go-guerrilla/wiki/Backends,-configuring-and-extending#processor-shutdown
-
 // ----------------------------------------------------------------------------------
 // Processor Name: PSQLProcessor
 // ----------------------------------------------------------------------------------
@@ -48,13 +42,13 @@ import (
 // Output        : None
 // ----------------------------------------------------------------------------------
 
-// let's write a proper ass processor
 type PSQL struct {
 	config *psqlConfig // config entity
 	cache  *sql.Stmt   // a struct to store a prepared statement and execute it when needed
 	logger log.Logger  // logger
 }
 
+// vars to load from the backend configuration
 type psqlConfig struct {
 	Table       string `json:"mail_table"`
 	PrimaryHost string `json:"primary_mail_host"`
@@ -73,33 +67,33 @@ type ProcessorShutdowner interface {
 // The PSQLProcessor decorator [save emails to database]
 var PSQLProcessor = func() backends.Decorator {
 	var (
-		config *psqlConfig // config entity
-		db     *sql.DB     // database instance (i think)
-		vals   []interface{}
+		config *psqlConfig   // config entity
+		db     *sql.DB       // database instance
+		vals   []interface{} // email data to write to the database
 	)
 
 	p_psql := &PSQL{
 		logger: backends.Log(),
 	}
 
-	// init function loading config file
 	backends.Svc.AddInitializer(backends.InitializeWith(func(backendConfig backends.BackendConfig) error {
+		// fetch the backend configuration data
 		configType := backends.BaseConfig(&psqlConfig{})
 		bcfg, err := backends.Svc.ExtractConfig(backendConfig, configType)
 		if err != nil {
 			return err
 		}
-
+		// save backend configuration
 		config = bcfg.(*psqlConfig)
 		p_psql.config = config
 
-		// load env variables
+		// load database connection parameters from .env file
 		err = godotenv.Load()
 		if err != nil {
-			p_psql.logger.Warn("Failed to load ENV variables")
+			p_psql.logger.Warn("Failed to load ENV variables") // ignore the message if the variables are already set in the environment
 		}
 
-		// connect to database
+		// create the database connection and save it
 		db, err = p_psql.connectToDb(os.Getenv("DB_HOST"), os.Getenv("DB_NAME"), os.Getenv("DB_USER"), os.Getenv("DB_SECRET"), os.Getenv("DB_SSLMODE"))
 		if err != nil {
 			return err
@@ -107,8 +101,8 @@ var PSQLProcessor = func() backends.Decorator {
 		return nil
 	}))
 
-	// if there's a db connection, close it
 	backends.Svc.AddShutdowner(backends.ShutdownWith(func() error {
+		// close the database connection if it's open
 		if db != nil {
 			return db.Close()
 		}
@@ -155,16 +149,16 @@ var PSQLProcessor = func() backends.Decorator {
 						if value, ok := e.Header["Content-Type"]; ok {
 							content_type = value[0]
 						}
-						body = p_psql.getMessageStr(e) // entire message as default
+						// convert the email message into a string
+						body = p_psql.getMessageStr(e)
 					}
 
 					p_psql.logger.Debug(body)
 					p_psql.logger.Debug(content_type)
 					ip_addr := e.RemoteIP
-					// let's build a list of values for the query
+
 					vals = []interface{}{} // clean slate
-					// add values
-					// order: "message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path
+					// order: "message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path"
 					vals = append(vals,
 						message_id,
 						pq.Array(from),
@@ -178,30 +172,22 @@ var PSQLProcessor = func() backends.Decorator {
 						ip_addr,
 						return_path,
 					)
-					//for i, v := range vals {
-					//	log.Printf("Index %d: Value %v (Type %T)\n", i, v, v)
-					//}
-					// get a list of to and recepients
-					// check if any in database
-
-					db_recepients, err := p_psql.getValidRecepients(db, append(to, recipients...))
-					// if not return backends error invalid recepient
+					// fetch users to create inbox records for
+					db_recipients, err := p_psql.getValidRecipients(db, recipients)
+					// throw error if the message is not addressed to any users
 					if err != nil {
-						return backends.NewResult("403 Error: invalid recepient"), err
+						return backends.NewResult("403 Error: invalid recipient"), err
 					}
-					// prepare query
+					// save the email to the emails table
 					stmt := p_psql.prepareInsertQuery(db)
-					// execute query
 					err = p_psql.executeQuery(stmt, &vals)
 					if err != nil {
 						return backends.NewResult("554 Error: could not save email"), err
 					}
-					// idk how but get new email id and create inbox entry for each valid recepient
-					for _, v := range db_recepients {
+					// create inbox entry for every user present in the email recipient list
+					for _, v := range db_recipients {
 						p_psql.insertInboxEntry(db, v, message_id)
 					}
-					// call the next processor in the chain
-					return p.Process(e, task)
 				}
 				return p.Process(e, task)
 			},
@@ -209,8 +195,9 @@ var PSQLProcessor = func() backends.Decorator {
 	}
 }
 
+// Creates a connection to the database with provided paramaters and returns it as a pointer
 func (p_psql *PSQL) connectToDb(host string, name string, user string, secret string, sslmode string) (*sql.DB, error) {
-	// define connection string with db name, user and password
+	// define connection string
 	connStr := fmt.Sprintf("host=%s dbname=%s user=%s password=%s sslmode=%s", host, name, user, secret, sslmode)
 	// connect to db
 	db, err := sql.Open("postgres", connStr)
@@ -221,6 +208,7 @@ func (p_psql *PSQL) connectToDb(host string, name string, user string, secret st
 	return db, err
 }
 
+// Prepares a query for writing an email to database and saves it to `p_psql` STMT cache
 func (p_psql *PSQL) prepareInsertQuery(db *sql.DB) *sql.Stmt {
 	insertQuery := `INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") 
 	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
@@ -233,6 +221,7 @@ func (p_psql *PSQL) prepareInsertQuery(db *sql.DB) *sql.Stmt {
 	return cache
 }
 
+// Executes a prepared database query with values `vals`
 func (p_psql *PSQL) executeQuery(cache *sql.Stmt, vals *[]interface{}) error {
 	p_psql.logger.Debug("Executing query with values %v", vals)
 	_, err := cache.Exec(*vals...)
@@ -262,7 +251,7 @@ func (p_psql *PSQL) getAddressFromHeader(e *mail.Envelope, headerKey string) str
 	return ""
 }
 
-// handle multiple addresses
+// Verify the email addresses listed in the header `headerKey` are valid.
 func (p_psql *PSQL) getAddressesFromHeader(e *mail.Envelope, headerKey string) []string {
 	values, ok := e.Header[headerKey]
 	if ok {
@@ -279,6 +268,7 @@ func (p_psql *PSQL) getAddressesFromHeader(e *mail.Envelope, headerKey string) [
 	return nil
 }
 
+// Fetches data from RcptTo header and returns is as a slice of strings
 func (p_psql *PSQL) getRecipients(e *mail.Envelope) []string {
 	var recipients []string
 	for _, rcpt := range e.RcptTo {
@@ -287,7 +277,7 @@ func (p_psql *PSQL) getRecipients(e *mail.Envelope) []string {
 	return recipients
 }
 
-// god bless this fella: https://pkg.go.dev/github.com/jhillyerd/enmime#Envelope
+// Converts the email message into a string
 func (p_psql *PSQL) getMessageStr(e *mail.Envelope) string {
 	bodyReader := e.NewReader()
 	body, err := io.ReadAll(bodyReader)
@@ -298,9 +288,9 @@ func (p_psql *PSQL) getMessageStr(e *mail.Envelope) string {
 	return string(body)
 }
 
-// borrowed from https://github.com/juliangruber/go-intersect/blob/master/intersect.go
-func (p_psql *PSQL) getValidRecepients(db *sql.DB, recepients []string) ([]string, error) {
-	// get list of recepients
+// Returns a slice of recipients that have user entries  in the database associated with them
+func (p_psql *PSQL) getValidRecipients(db *sql.DB, recipients []string) ([]string, error) {
+	// get list of recipients
 	// get list of inboxes from db
 	rows, err := db.Query(`SELECT email_address FROM users;`)
 	if err != nil {
@@ -315,10 +305,11 @@ func (p_psql *PSQL) getValidRecepients(db *sql.DB, recepients []string) ([]strin
 		}
 		inboxes = append(inboxes, email)
 	}
-	// find overlap
+	// Get recipients that are present in the users table
+	// borrowed from https://github.com/juliangruber/go-intersect/blob/master/intersect.go
 	set := make([]string, 0)
 	hash := make(map[string]struct{})
-	for _, v := range recepients {
+	for _, v := range recipients {
 		hash[v] = struct{}{}
 	}
 	for _, v := range inboxes {
@@ -327,20 +318,22 @@ func (p_psql *PSQL) getValidRecepients(db *sql.DB, recepients []string) ([]strin
 		}
 	}
 	if len(set) == 0 {
-		return nil, DatabaseError("No valid email recepients found.")
+		return nil, DatabaseError("No valid email recipients found.")
 	}
 	return set, nil
 }
 
+// Creates a record in `inboxes` table linking email message to the recipient in `users` table
 func (p_psql *PSQL) insertInboxEntry(db *sql.DB, email string, message_id string) {
 	query := `INSERT INTO inboxes (user_id, mail_id) VALUES ($1, $2)`
 	_, err := db.Exec(query, email, message_id)
 	if err != nil {
-		p_psql.logger.Warnf("Failed to create inbox entry! message_id %[1] for email %[2]", message_id, email)
+		p_psql.logger.Warnf("Failed to create inbox entry! message_id %s for email %s", message_id, email)
 	}
 }
 
-// yeah i stole it and i don't care: https://github.com/emersion/go-message/blob/v0.18.1/mail/header.go#L338
+// Generates an RFC 2822-compliant Message-Id
+// Borrowed from: https://github.com/emersion/go-message/blob/v0.18.1/mail/header.go#L338
 func (p_psql *PSQL) generateMessageID(hostname string) string {
 	now := uint64(time.Now().UnixNano())
 	nonceByte := make([]byte, 8)
@@ -349,7 +342,6 @@ func (p_psql *PSQL) generateMessageID(hostname string) string {
 	return message_id
 }
 
-// https://github.com/emersion/go-message/blob/v0.18.1/mail/header.go#L352
 func base36(input uint64) string {
 	return strings.ToUpper(strconv.FormatUint(input, 36))
 }

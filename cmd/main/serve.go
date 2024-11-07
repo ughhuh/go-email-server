@@ -19,6 +19,7 @@ var (
 	configFile    string
 )
 
+// Configures guerilla daemon and starts it
 func serve(cfile string) {
 	// set logger
 	logger := backends.Log()
@@ -36,7 +37,11 @@ func serve(cfile string) {
 	}
 
 	// create a directory for logs if needed
-	ensureLogDirectory(d.Config.LogFile)
+	// the daemon will fail to start if the path to the log file as specified in `log_file` doesn't exist
+	cfg := d.Config.LogFile
+	if cfg != "stdout" && cfg != "stderr" && cfg != "off" {
+		ensureLogDirectory(cfg)
+	}
 
 	// start daemon
 	err = d.Start()
@@ -48,6 +53,7 @@ func serve(cfile string) {
 	sigHandler()
 }
 
+// Checks if the directory path to the file exists. If not, creates the directory path
 func ensureLogDirectory(logfile string) {
 	// extract the directory path from the logfile
 	dir := filepath.Dir(logfile)
