@@ -83,6 +83,24 @@ Example configuration file:
   - `listen_interface` is the IP and port to listen on
   - `max_clients` is the maximum number of concurrent clients
 
+Database connection parameters are defined as environmental variables.
+
+`.env`:
+
+```sh
+DB_HOST=string
+DB_NAME=string
+DB_USER=string
+DB_SECRET=string
+DB_SSLMODE=string
+```
+
+- `DB_HOST` is the database hostname. Can be set to `localhost`, `host.docker.internal`, or the name of the service when used with Docker compose.
+- `DB_NAME` is the name of the database.
+- `DB_USER` is the database user to use to execute queries.
+- `DB_SECRET` is the password of the database user.
+- `DB_SSLMODE` is the database SSL mode. Available values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`.
+
 todo
 
 - in thesis mention how processor decoration is done with ProcessorConstructor
