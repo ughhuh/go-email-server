@@ -360,3 +360,4 @@ then i prepare a rather simple insert query `INSERT INTO %s("message_id", "from"
 so, the thing is that when an email is sent to 2 addresses on the same server, it is received as one email with 2 recipients. Example log: `"Mail from: alena.galysheva@gmail.com / to: [{af2db5b2-c743-4442-a7d8-c74afaf26907 vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false} {tester vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false}]"`. this is why we have the middle table to associate the email with two valid recipients. this is why the recipients needs to be verified, and the record should be created for each. there can also be recipients to like other services but that's okay since the getValidRecipients returns the ones present in the database and doesn't raise error as long as there's at least 1 valid recipient present.
 
 10:15-13:15, 14:15-16:30, 17:00-18:00
+2 + 2.15 + 1
