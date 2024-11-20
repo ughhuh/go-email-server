@@ -101,36 +101,29 @@ DB_SSLMODE=string
 - `DB_SECRET` is the password of the database user.
 - `DB_SSLMODE` is the database SSL mode. Available values: `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`.
 
-todo
-
-- in thesis mention how processor decoration is done with ProcessorConstructor
-- revisit all comments in files and clean up docstrings
-- document future improvements
-
 ## Processors
 
 ### Developing and extending
 
 Go Guerilla documentation: [Backends, configuring and extending](https://github.com/phires/go-guerrilla/wiki/Backends,-configuring-and-extending).
 
-the base implementation of the processor can be extended using the decorator pattern as suggested by developers (link to documentation). the idea is that we take the processor as parameter, add some code extending the functionality, and execute the processor before or after our custom code. This approach allows us to add functionality on top of the base implementation without breaking the base implementation.
+MTA service was implemented on the base of Go Guerilla daemon. When the service is started, the configuration is loaded and applied it to the daemon, which then started, and the main thread starts to listen for incoming interruption signals to gracefully handle them. The daemon starts the gateway backend and worker processes and proceeds to listen for SMTP traffic on the interface specified in the configuration file. When an SMTP message is received, it is converted to the Go Guerrilla Envelope, added to the conveyor channel, from which the message is picked up by an available worker process. The worker processes the Envelope using the Processor decorated with the processors specified in the configuration file, which typically includes parsing message headers and body, and writing the processed data to the database. On a graceful shutdown, each worker is terminated without force, allowing them to finish their tasks without data loss.
 
-each worker is structured using a decorator pattern. the decorator pattern chains the processors into a single processor. each processor gets the envelope as the pointer and a task, processes the envelope based on the task, and then either passes the envelope to the next processor in the chain or returns the result back to the caller.
+Guerilla daemon is structured around the Gateway backend system, which orchestrates a set of workers running in their own goroutines. When a Gateway receives a new envelope object from the server, it adds it to the conveyor channel, from which it can be picked and processed by an available worker. Each worker is defined as a set of processors that are called in succession to process the envelope. When the processor is done processing the envelope, it should either pass it down the execution chain to the next processor or return the result back to the caller. Once all the processors are executed, the worker sends the results back. As a part of the development work for this thesis, two processors were implemented to process the MIME messages and the save the data of the envelope to a PostgreSQL database and verify the validity of the recipient.
+
+Go Guerilla has a base implementation of the Processor interface that can be extended using decorator pattern. Decorator is a design pattern that allows to add new behavior to a component without affecting its base implementation by wrapping it with another object, known as the decorator. A decorator object implements the same interface as the wrapped (decorated) object, ensuring the client perceives both objects as identical. It forwards requests to the decorated object while performing additional actions before or after the forwarding, preserving the base functionality of the object. Since the decorator holds a reference to the decorated object, it’s possible to design this reference to accept any object that implements the same interface. This compatibility allows multiple decorators to be stacked, combining the effects of their behaviors, while maintaining their independence.
 
 #### `processor.go`
 
-`Processor` is defined to have a method that takes in the [Guerilla `Envelope`](https://github.com/phires/go-guerrilla/blob/master/mail/envelope.go) and a `SelectTask` task, processes it, and returns the `Result` result and error if such arose.
+In Go Guerrilla, the `Processor` is implemented as an interface with a `Process` method that takes in an `Envelope` and a `SelectTask`, returning a `Result` and an error. The `ProcessWith` type is a function type with the same signature as the `Process` method, allowing it to act as a wrapper around the base function and enabling the application of decorators.
+
+The `Process` method is defined on the `ProcessWith` type and satisfies the `Processor` interface. Internally, it calls the underlying function `f`, passing in the `Envelope` and `SelectTask`, and returning the result. This design allows `ProcessWith` to be decorated, meaning that additional functionality can be layered on top of the base `Process` method. Decorators can invoke the core processor function either before or after applying their own custom logic, extending functionality without altering the underlying implementation.
 
 ```go
 type Processor interface {
   Process(*mail.Envelope, SelectTask) (Result, error)
 }
 
-```
-
-So we got `Processor` interface that serves as the base for all processor implementations. `ProcessWith` is a function type with a function signature matching the `Processor` interface. `Process` is implemented to act as a wrapper for the `ProcessWith` by calling the underlying function `f` with parameters passed to Process and returns the result.
-
-```go
 // Signature of Processor
 type ProcessWith func(*mail.Envelope, SelectTask) (Result, error)
 
@@ -141,7 +134,7 @@ func (f ProcessWith) Process(e *mail.Envelope, task SelectTask) (Result, error) 
 }
 ```
 
-so yeah there is `DefaultProcessor` that is an undecorated worker that does nothing. Its `Process` method just returns the Result. It's the last processor in the stack, so if it's reached then all is good.
+The `DefaultProcessor` is a simple, undecorated processor that serves as the last step in the processing chain. Its Process method returns a successful `Result` without any additional actions. Since it does not pass the envelope to any subsequent processor, `DefaultProcessor` is placed as the final step in Go Guerilla’s processor stack. When reached, it signals that the envelope has been successfully processed through all preceding layers. Its `Process` method implements the `Processor` interface, which allows the `DefaultProcessor` to be decorated with other Processors.
 
 ```go
 type DefaultProcessor struct{}
@@ -153,7 +146,7 @@ func (w DefaultProcessor) Process(e *mail.Envelope, task SelectTask) (Result, er
 
 #### `decorate.go`
 
-`Decorator` is defined as a function that takes in the `Processor` and returns the `Processor`. `Decorate` function takes in the Processor and a list of `Decorator` decorators. `ds` is a variadic parameter that can allows any number of arguments to be taken as the parameter. so the function takes the processor and then loops through the decorators and for each `decorator` it takes the latest `Processor` stored in `decorated` and wraps it in the `Decorator` function and saves the resulting `Processor` as `decorated`. so yeah that's how the stack is built.
+The `Decorator` type is defined as a function that takes a `Processor` as input and returns a `Processor`. This means any function matching this signature to act as a `Decorator`. To pass the data to the next `Processor` in the stack, each `Decorator` implementation calls the `Process()` method on the `Processor` it receives. The `Decorate` function stacks multiple `Processors` on top of the base `Processor`. It accepts the base `Processor` `c` and a variadic parameter `ds` for an unlimited number of decorators. `Decorate` stores the base Processor as the decorated variable, then iterates through each decorator, wrapping decorated with the current Decorator, and updates decorated each time.  This builds a processing stack, with each decorator layering additional functionality around the previous processor. The function returns the fully decorated `Processor`.
 
 ```go
 // We define what a decorator to our processor will look like
@@ -167,11 +160,7 @@ func Decorate(c Processor, ds ...Decorator) Processor {
   }
   return decorated
 }
-```
 
-A processor is registered by saving the name of the processor and corresponding decorator in the `processors` map.
-
-```go
 type ProcessorConstructor func() Decorator
 
 func (s *service) AddProcessor(name string, p ProcessorConstructor) {
@@ -183,11 +172,7 @@ func (s *service) AddProcessor(name string, p ProcessorConstructor) {
   // add to our processors list
   processors[strings.ToLower(name)] = c
 }
-```
 
-The actual decoration is done by the backend gateway. it fetches the `processor` map from the configuration file, saves the `Decorator` functions used in the process, and applies them in reverse order to the `DefaultProcessor` using `Decorate` function.
-
-```go
 func (gw *BackendGateway) newStack(stackConfig string) (Processor, error) {
   var decorators []Decorator
   cfg := strings.ToLower(strings.TrimSpace(stackConfig))
@@ -213,13 +198,9 @@ func (gw *BackendGateway) newStack(stackConfig string) (Processor, error) {
 
 ### MIME parser
 
-This leads us into the discussion about creating your own process. the processor should be a function that returns a `Decorator.` when extending the backend, i am using go guerilla as a package, hence the `backends.Decorator` usage.
+The MIME Parser Processor addresses limitations in Go Guerrilla’s default email parsing, which performs basic email header parsing and expects the entire message to be saved in the body. The `MimeParserProcessor` is implemented as a custom processor using the decorator pattern. This processor is set up as a function that returns a `backends.Decorator`, which wraps and extends the functionality of the `Processor` interface.
 
-ok so line by line. on line 5 `MimeParserProcessor` is defined as a function that returns a `backends.Decorator` (which was defined earlier as `type Decorator func(Processor) Processor`). `MimeParserProcessor` acts as a constructor for the anonymous function.
-
-line 6 we have another anonymous function that accepts the `Processor` as an argument and returns `Processor`. It essentially implements the `Processor` interface with additional logic and creates a new `Processor` that uses `p`.
-
-line 7 we have `ProcessWith` type that is an implementation of the `Processor` interface. It takes an anonymous function defined on lines 8-13 that matches the signature of the `Processor` interface. Essentially, `ProcessWith` is used to construct the decorator with the `Processor` interface. on line 8, you can see it takes arguments envelope as a pointer and a task and returns a result and an error. This function that starts on line 8 will actually do the custom processing of the Envelope as seen on line 9-11. After performing actions on the `Envelope`, the decorated `Processor` `p` is called on line 12 with the processed envelope and the task. this continues the processing sequence and completed the decorator.
+`MimeParserProcessor` is defined as a function `backends.Decorator`. This function effectively acts as a constructor for the decorator. Inside `MimeParserProcessor`, an anonymous function is defined that takes a `Processor` as an argument and returns a new `Processor`. It acts as a constructor for an anonymous function that will implement additional logic for the `Processor`. `ProcessWith`, which implements the Processor interface, is then initialized on line 7. `ProcessWith` takes an anonymous function that matches the Processor signature, allowing to construct the decorator that conforms to the Processor interface. This function takes the envelope as a pointer and task arguments, performs custom processing, and returns a result and any error. After processing the envelope, it hands the modified envelope off to the next Processor in the chain by calling `p.Process(e, task)`, continuing the processing sequence and completing the decoration.
 
 ```go
 type MimeParser struct {
@@ -239,9 +220,7 @@ var MimeParserProcessor = func() backends.Decorator {
 }
 ```
 
-`Envelope` has an implementation of `io.Reader()` that returns a reader  for reading the delivery headers and the email message. I get the reader for the processed email and pass it to a `ReadEnvelope()` that parses the contents of the provided reader into an `enmime.Envelope`, populating it with email message data, and then insert the `enmime.Envelope` value with ley `envelope_mime` to the `guerilla.Envelope`'s `Values` map. `Values` stores the values generated by the backend processors while processing the envelope.
-
-`enmime.Envelope` stores the plain text portion of the message as `Text` attribute, html portion as `HTML`, attachments, inlines and other parts as their respective slices of `*Part`s. `Part` is a representation of the part in the MIME multipart message. If no plain text is found in the message, the text is extracted from the HTML part of the email message as saved as `Text`. `enmime.Envelope` also has attribute `Root` that stores the headers of the email message.
+Figure 6 contains the code used to parse the email message by the processor using the `enmime` library. A reader for the email message is retrieved from the Guerilla Envelope object. This reader is then passed to ReadEnvelope(), which processes the contents into an `enmime.Envelope` object. Once populated, the `enmime.Envelope` is stored in the Values map of `guerilla.Envelope` under the key envelope mime, which stores the values generated by the backend processors while processing the envelope. Within `enmime.Envelope`, email content is segmented into attributes that simplify data handling. `Text` attribute holds the plain text version of the message, while HTML stores the HTML version. Other components, like attachments and inline elements, are organized in respective slices of `*Part` objects, where each `Part` represents a distinct section in the MIME multipart message. If no plain text is directly provided, `enmime.Envelope` will extract plain text from the HTML version and store it in the `Text` attribute. `Root` attribute holds the email headers, enabling structured access to the top-level headers of the message.
 
 ```go
 envReader := e.NewReader()
@@ -254,13 +233,9 @@ e.Values["envelope_mime"] = env
 
 ### PSQL processor
 
-This processor extracts the previously parsed data from the `guerilla.Envelope` envelope and saves it as a record in the PSQL database.
+The PSQL Processor extracts previously parsed email data from the `guerilla.Envelope` object and saves it as a record in the PostgreSQL database. Like the MIME Parser Processor, this implementation uses the decorator pattern, but with additional elements to manage the database connection efficiently. Rather than opening and closing the database connection for each envelope, the connection is established when the processor is initialized and closed when the processor shuts down, which allows the connection to be reused throughout multiple operations.
 
-the decoration is done the same way as in mime parser processor with a few additional things. see, we need to connect to the database to read and write data and close the connection once we're done. opening and closing it for every envelope is inefficient, so let's set up the connection when the processor is initialized and close it on processor shutdown.
-
-the initializer is the function that is executed when the backend is initialized by the gateway. similarly, shutdowner is a function that is executed when the backend is being shut down by the gateway.
-
-An initializer can be registered using `backends.Svc.AddInitializer` function that registers any function that implements `processorInitializer` interface. This function will be executed when the backend is initialized. `backends.InitializeWith` type implements the `processorInitializer` interface and its `Initialize()` method just calls the `InitializeWith` function. Passing the anonymous function with initialization logic to `backends.IntializeWith` ensures the function meets the initializer requirements and can utilize backend configuration during its execution.
+The initialization is managed by a function registered with `backends.Svc.AddInitializer`, which ensures that any function implementing the `processorInitializer` interface runs when the backend is initialized by the gateway. `backends.InitializeWith`, which implements the `processorInitializer` interface, then calls the provided function with the initialization logic. Similarly, the shutdown process uses a paired shutdown function, which follows the same structure as the initializer to ensure a clean and controlled closure of resources.
 
 ```go
 var PSQLProcessor = func() backends.Decorator {
@@ -290,9 +265,7 @@ func (s *service) AddInitializer(i processorInitializer) {
 }
 ```
 
-Shutdown acts as a sister function to the initializer and mirrors its definition and execution logic.
-
-Onto next thing: the email saving. so first i get the data from the envelope that was inserted by the previous processors. so yeah as you can see i fetch stuff like message id, from, to, reply to, sender, recipients, return path, subject from the guerilla envelope. notably, all of these are headers. i verify the validity of the headers using `getAddressesFromHeader` method, which fetches the address slice from the `Header` field of the guerilla `Envelope` and attempts to parse each of them into a RFC5322 email address.
+Once reached in the stack with `TaskSaveEmail` task, the processor handles email saving. The function retrieves relevant headers and metadata from the `guerilla.Envelope`, such as `Message-Id`, `From`, `To`, `Reply-To`, `Sender`, `Recipients`, `Return-Path`, `Subject`, and remote IP and verifies them using the `getAddressesFromHeader` method that extracts and parses each address in compliance with RFC 5322.
 
 ```go
   var message_id string
@@ -313,7 +286,7 @@ Onto next thing: the email saving. so first i get the data from the envelope tha
   subject := e.Subject
 ```
 
-so yeah next i check if the mime parser was executed. if yes, i fetch email's content type and corresponding type. only the plain text and html parts of the enmime `Envelope` are saved. if you wish to extend the service to save attachments and other media to the database, then you can retrieve the `enmime.Part`s from the `env_mime` variable set on the line 2.
+Next, if the MIME Parser Processor was executed, the email’s content type, text, and HTML parts are retrieved from the `enmime.Envelope`. Currently, only the plain text and HTML sections are saved. If needed, the processor could be extended to save attachments and other MIME parts by accessing `enmime.Parts` in the parsed envelope.
 
 ```go
   var body, content_type string
@@ -333,7 +306,7 @@ so yeah next i check if the mime parser was executed. if yes, i fetch email's co
   }
 ```
 
-after all the data is fetched from the `guerilla.Envelope`, i create aan empty slice and append values to it in the order that they're written to the database.
+The gathered email data is then organized into a slice for database insertion. Before saving, the processor checks that at least one of the recipients fetched from the envelope is valid by comparing them with entries in the users table and saves the recipients in a slice of strings. The processor proceeds to construct and execute an insert query to add the message to the database, using parameterized syntax to ensure safe data insertion. After the message is saved successfully, an entry is created in the inboxes table for each valid recipient with the message ID of the envelope.
 
 ```go
   vals = []interface{}{} // clean slate
@@ -352,12 +325,3 @@ after all the data is fetched from the `guerilla.Envelope`, i create aan empty s
     return_path,
   )
 ```
-
-so since the recipient and to fields in the database aren't set as foreign keys, i need to perform the check manually to ensure that the recipient is a valid user, and that the at least one of the To addresses is a valid user. i recall you need to separate the checks since the recipient can be registered if the smtp message is sent over the localhost. in short, i fetch email addresses from the users table, save them as a slice, and then find the intersection between the slices by trying to fetch each `recipient` from the database email list, and if the action succeeds, i save the recipient in the `set` slice. if the slice isn't empty at the end, then there must be at least one valid recipient.
-
-then i prepare a rather simple insert query `INSERT INTO %s("message_id", "from", "to", "reply_to", "sender", "subject", "body", "content_type", "recipient", "ip_addr", "return_path") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)` in `prepareInsertQuery()`. if you decide to change the columns in the emails table, then this query needs to be updated. use `$X` syntax to ensure the safe insertion of the data into the query. then the email is written to the database. an entry is then created in the inbox table to link the email message to the user receiving it.
-
-so, the thing is that when an email is sent to 2 addresses on the same server, it is received as one email with 2 recipients. Example log: `"Mail from: alena.galysheva@gmail.com / to: [{af2db5b2-c743-4442-a7d8-c74afaf26907 vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false} {tester vm4408.kaj.pouta.csc.fi [] [] false false <nil>  false}]"`. this is why we have the middle table to associate the email with two valid recipients. this is why the recipients needs to be verified, and the record should be created for each. there can also be recipients to like other services but that's okay since the getValidRecipients returns the ones present in the database and doesn't raise error as long as there's at least 1 valid recipient present.
-
-10:15-13:15, 14:15-16:30, 17:00-18:00
-2 + 2.15 + 1
